@@ -1,0 +1,16 @@
+zone:
+  name: "SalishSea"
+  lat_min: 47.5021
+  lat_max: 50.0021
+  lon_min: -127.0021
+  lon_max: -122.1021
+  resolution_arcsec: 15        # GEBCO 15-arcsec grid
+  depths: [1.5, 2.5, 5, 7.5, 10, 15, 20, 25, 50, 70.69, 71.87, 75, 100, 117.7, 150, 162.04, 164.51, 172.32, 188.75, 200, 229.38, 239.73, 250, 300, 350, 400, 450, 500]
+  projection: "EPSG:32610"     # UTM 10N
+  coastline_path: "/Users/maximilianlauch/Documents/Model_Python_Conversion/py_data/coastlines/salish_sea_coastline.geojson"
+
+
+timestep_minutes: 5         # model timestep - interpolate to this grid as "coarse" model grid
+max_interp_gap_minutes: 60  # don't interpolate across gaps larger than this
+max_stitch_hours: 6
+sog_max: 30                 # Maximum SOG any of the ships can go, otherwise those points are dropped
