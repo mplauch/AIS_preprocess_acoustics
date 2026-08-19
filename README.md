@@ -10,3 +10,17 @@ python Preprocess_ais.py --input data/raw/AIS_2025.csv \\
                          --output data/ais/ \\
                          --config config.yaml
 ```
+
+### Important Directories on HPC
+The data live in the following directory on the HPC (only 2025 Jan-Nov as of writing this):
+```
+/gpfs/fs7/dfo/meq/work/mal007/ALGORITHMS/dev/py_model/py_inputs/AIS
+```
+Specifically, the daily parquet files are in:
+```
+/gpfs/fs7/dfo/meq/work/mal007/ALGORITHMS/dev/py_model/py_inputs/AIS/2025_baseline
+```
+and the raw file is in:
+```
+/gpfs/fs7/dfo/meq/work/mal007/ALGORITHMS/dev/py_model/py_inputs/AIS/2025_raw
+```
