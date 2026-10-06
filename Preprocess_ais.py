@@ -1,7 +1,7 @@
 """
 Preprocess_ais.py
 
-Large raw CSV --> cleaned, interpolated Parquet files on a regular time grid.
+Large raw CSV --> cleaned, interpolated daily Parquet files on a regular time grid.
 
 interpolates onto a fine regular grid FIRST, then filters on the regularly-spaced data, then
 re-interpolates to fill gaps. This produces stable speed estimates
@@ -13,16 +13,17 @@ Pipeline:
     - Load raw CSV, standardize columns, spatial filter (only take points in zone)
     - Per ship: segment track --> per segment: interpolate to 1-min grid -->
       compute speed --> iteratively filter --> re-interpolate --> recompute
-    - Collapse ship dimensions (length/breadth/draught) to single values
-    - Save cleaned daily Parquet (1-min resolution)
+    - Collapse scalar/constant ship dimensions (length/breadth/draught) to single values
+    - Save cleaned daily Parquet (1-min resolution by default for 1st pass)
 
   Pass 2 (per day):
-    - Load cleaned data with neighbor-day edge records (cross-day stitching)
-    - Re-resolve SOG (speed over ground) on stitched data
-    - Interpolate onto the model timestep grid (e.g. 5-min or 30-min)
-    - Gap-aware: never interpolate across observation gaps > max_interp_gap
+    - Load cleaned data with neighbor-day edge records (cross-day stitching, in case ships travel overnight or have
+      consistent, consecutive points that span more than one day)
+    - Re-resolve sog on stitched data
+    - Interpolate onto the model timestep grid (typically use 5-min but can input any)
+    - Note: script never interpolates across observation gaps > max_interp_gap to avoid weird jumps
 
-How to use:
+How to run:
     python preprocess_ais.py --input data/raw/AIS_2025.csv \\
                              --output data/ais/ \\
                              --config config.yaml
@@ -89,7 +90,7 @@ def load_and_standardize(csv_path):
 
 
 def spatial_filter(df, config):
-    """Keep only points within the study area zone bounds"""
+    """Keep only points within the study area zone bounds found in config file"""
     z = config['zone']
     return df[
         (df['lat'] >= z['lat_min']) & (df['lat'] <= z['lat_max']) &
@@ -98,7 +99,7 @@ def spatial_filter(df, config):
 
 
 # ===========================================================================
-# Geometry utilities
+# Geometry tools
 # ===========================================================================
 
 def haversine_nm(lat1, lon1, lat2, lon2):
@@ -114,7 +115,6 @@ def haversine_nm(lat1, lon1, lat2, lon2):
 def compute_segment_speeds(lat, lon, time_vals):
     """
     Compute speed (knots) between consecutive points
-    time_vals should be numpy datetime64 array or pandas DatetimeIndex
     """
     dt_hours = np.diff(time_vals).astype('timedelta64[s]').astype(float) / 3600
     dist_nm = haversine_nm(lat[:-1], lon[:-1], lat[1:], lon[1:])
@@ -142,18 +142,19 @@ def compute_centered_speed(lat, lon, time_vals):
 
 
 # ===========================================================================
-# Track segmentation
+# Track segmentation/separation
 # ===========================================================================
 
 def segment_track(group, max_gap_minutes=30, max_jump_kn=40):
     """
-    Split a ship's track into continuous segments
+    Split a ship's track into continuous segments (to separate between trips like
+    if the ship was sitting at port)
 
     A new segment starts when:
-      - The time gap exceeds max_gap_minutes
-      - Implied speed exceeds max_jump_kn (GPS glitch or duplicate MMSI)
+      - The time gap b/w points exceeds max_gap_minutes
+      - Implied speed exceeds max_jump_kn (GPS jump or duplicate MMSI)
 
-    Returns list of DataFrames, one per segment
+    Returns list of df, one per segment
     """
     group = group.sort_values('time').reset_index(drop=True)
 
@@ -193,17 +194,17 @@ def quality_filter_segment(seg, min_points=3,
                            sog_trust_min=3.0, sog_trust_max=30.0,
                            max_sog_disagreement=5.0):
     """
-    Quality filter segment does the following:
-      1. Removes isolated position jumps from raw data
+    quality_filter_segment does the following:
+      1. Removes isolated position jumps from the raw data
       2. Interpolates onto a fine regular grid (default 1-min)
-      3. Computes speed on the regular grid (stable, consistent)
-      4. Resolves SOG (AIS vs position-derived)
+      3. Computes speed on the regular grid
+      4. Resolves sog (reported from AIS originally vs position-derived)
       5. Iteratively remove speed/acceleration outliers
       6. Re-interpolate to fill gaps left by removed points
       7. Recompute and verify speeds
       8. Final clamp as safety net
 
-    Returns a DataFrame on the fine grid, or None if discarded
+    Returns a df on the finer grid, or None if segment is discarded
     """
     if len(seg) < min_points:
         return None
@@ -247,7 +248,7 @@ def quality_filter_segment(seg, min_points=3,
     lat_fine = np.interp(t_fine, t_obs, seg['lat'].values)
     lon_fine = np.interp(t_fine, t_obs, seg['lon'].values)
 
-    # Carry AIS SOG onto the fine grid
+    # Carry AIS sog onto the fine grid
     if 'sog' in seg.columns and seg['sog'].notna().any():
         sog_ais_fine = np.interp(t_fine, t_obs, seg['sog'].fillna(0).values)
     else:
@@ -260,11 +261,11 @@ def quality_filter_segment(seg, min_points=3,
         'sog_ais': sog_ais_fine,
     })
 
-    # Step 2: Compute position-derived speed on the regular grid
+    # Step 2: Compute position-derived speed
     work['sog_pos'] = compute_centered_speed(
         work['lat'].values, work['lon'].values, work['time'].values)
 
-    # Step 3: Resolve SOG
+    # Step 3: Resolve sog
     sog_pos = work['sog_pos']
     sog_ais = work['sog_ais']
 
@@ -288,11 +289,13 @@ def quality_filter_segment(seg, min_points=3,
         sog = work['sog_final']
         aog = work['aog_final']
 
-        # Speed bounds
+        # Apply speed bounds
         cond_speed = (sog >= sog_min) & (sog <= sog_max)
-        # Acceleration bounds
+
+        # Apply acceleration bounds
         cond_accel = (aog.abs() <= aog_max) | aog.isna()
-        # Statistical outliers (using initial stats)
+
+        # Statistical outliers (using initial stats from Step 3)
         if sog_std_init > 0:
             cond_stat = (sog - sog_mean_init).abs() <= 3 * sog_std_init
         else:
@@ -307,7 +310,7 @@ def quality_filter_segment(seg, min_points=3,
         if len(work) < min_points:
             return None
 
-        # Re-interpolate to fill gaps left by removed points
+        # Re-interpolate to fill gaps left by filtered/removed points
         t_surv = (work['time'] - work['time'].iloc[0]).dt.total_seconds().values.astype(float)
         t_refill = np.arange(0, t_surv[-1] + fine_interval_sec, fine_interval_sec)
         refill_times = work['time'].iloc[0] + pd.to_timedelta(t_refill, unit='s')
@@ -318,7 +321,7 @@ def quality_filter_segment(seg, min_points=3,
             'lon': np.interp(t_refill, t_surv, work['lon'].values),
         })
 
-        # Recompute speed on the refilled grid
+        # Recompute sog on the refilled grid
         work['sog_pos'] = compute_centered_speed(
             work['lat'].values, work['lon'].values, work['time'].values)
         work['sog_final'] = work['sog_pos']
@@ -327,7 +330,7 @@ def quality_filter_segment(seg, min_points=3,
     if len(work) < min_points:
         return None
 
-    # Final safety clamp
+    # Final safety filter
     work['sog_final'] = work['sog_final'].clip(lower=0.0, upper=sog_max)
 
     return work
@@ -338,8 +341,8 @@ def quality_filter_ship(group, min_points_total=3, **kwargs):
     Full quality pipeline for one ship's daily data.
 
     Quality filter ship does the following:
-    1. Segments the track at gaps and teleportations
-    2. Filters each segment independently (interpolate-first approach)
+    1. Segments the track at gaps and coordinate jumps
+    2. Filters each segment independently with quality_filter_segment
     3. Recombines surviving segments
     """
     segments = segment_track(group)
@@ -367,8 +370,6 @@ def quality_filter_ship(group, min_points_total=3, **kwargs):
 def collapse_dimensions(group, original_group):
     """
     Collapse length/breadth/draught to single best value per ship.
-
-    Uses the original raw data (before interpolation)
     """
     group = group.copy()
     for col in ['length', 'breadth', 'draught']:
@@ -532,14 +533,15 @@ def interpolate_ship_track(group, time_grid, day_start, day_end,
 
 def process_raw_to_clean_daily(df_day, config):
     """
-    Pass 1: Per ship - segment, interpolate to fine grid, quality filter,
-    collapse dimensions. Output is cleaned data on fine 1-min grid (default)
+    Pass 1: Per ship
+    Segment, interpolate to fine grid, quality filter,
+    collapse dimensions. Output is cleaned data on fine 1-min grid
     """
     cleaned = []
     n_rejected = 0
 
     for mmsi, group in df_day.groupby('mmsi'):
-        # Quality filter (interpolate-first approach)
+        # Quality filter
         filtered = quality_filter_ship(group.copy())
         if filtered is None:
             n_rejected += 1
@@ -549,8 +551,6 @@ def process_raw_to_clean_daily(df_day, config):
         filtered['mmsi'] = mmsi
         if 'ship_type' in group.columns:
             filtered['ship_type'] = group['ship_type'].iloc[0]
-
-        # Collapse dimensions from original data
         filtered = collapse_dimensions(filtered, group)
 
         cleaned.append(filtered)
@@ -563,7 +563,7 @@ def process_raw_to_clean_daily(df_day, config):
 def resolve_sog_for_stitched(group, sog_trust_min=3.0, sog_trust_max=30.0,
                               max_disagreement=5.0, sog_max=30.0):
     """
-    Re-resolve SOG (speed over ground) for stitched data (cleaned + neighbor edge records)
+    Re-resolve sog (speed over ground) for stitched data (cleaned + neighbor edge records)
 
     Ensure consistent speed values across day boundaries
     """
@@ -592,7 +592,7 @@ def resolve_sog_for_stitched(group, sog_trust_min=3.0, sog_trust_max=30.0,
 
 def process_clean_to_interpolated(df_with_neighbors, date, config):
     """
-    Pass 2: Interpolates cleaned data onto the regular model time grid
+    Pass 2: Interpolates cleaned data onto the regular model time grid (e.g. 5-min)
     """
     timestep_min = config.get('timestep_minutes', 5)
     max_gap_min = config.get('max_interp_gap_minutes', 60)
@@ -670,7 +670,7 @@ def main(csv_path, output_dir, config_path):
         if len(df_stitched) == 0:
             continue
 
-        # Re-resolve SOG for stitched data
+        # Re-resolve sog for stitched data
         stitched_groups = []
         for mmsi, group in df_stitched.groupby('mmsi'):
             group = (group.sort_values('time')
