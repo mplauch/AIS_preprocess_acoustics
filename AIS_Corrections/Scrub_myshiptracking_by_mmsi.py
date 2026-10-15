@@ -56,7 +56,7 @@ def normalize_text(s: str) -> str:
 
 
 def labels_match(a: str, b: str) -> bool:
-    # Case-insensitive, ignores whitespace and trailing colons ("Type:" == "Type")
+    # ignores whitespace and trailing punctuation, case insensitive ("Type:" == "Type")
     clean = lambda x: normalize_text(x).rstrip(":").strip().lower()
     return clean(a) == clean(b)
 
@@ -155,7 +155,7 @@ def query_myshiptracking_by_mmsi(session, mmsi, save_html=False):
         "url": url,
     }
 
-    time.sleep(1 + random.uniform(0, 1))  # small gap between search and detail request
+    time.sleep(1 + random.uniform(0, 1))  # small gap between search and detail request, keeps from getting blocked
     r = session.get(url, timeout=TIMEOUT)
     result["url"] = r.url  # keep the final URL if the site redirected
 
