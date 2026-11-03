@@ -23,10 +23,6 @@ Pipeline:
     - Interpolate onto the model timestep grid (typically use 5-min but can input any)
     - Note: script never interpolates across observation gaps > max_interp_gap to avoid weird jumps
 
-How to run:
-    python preprocess_ais.py --input data/raw/AIS_2025.csv \\
-                             --output data/ais/ \\
-                             --config config.yaml
 """
 
 import pandas as pd
@@ -38,6 +34,14 @@ import warnings
 
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 
+CSV_PATH = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/Fixed_AIS_2015_Corrected.csv"
+
+# Output directory (creates clean/ and interpolated/ subfolders)
+OUTPUT_DIR = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/2015_daily_ais"
+
+# Zone / timestep settings (zone_config.yaml)
+CONFIG_PATH = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/zone_config.yaml"
+# =====================================================================
 
 # ===========================================================================
 # Loading and standardization
@@ -72,15 +76,23 @@ def load_and_standardize(csv_path):
     ]
 
     if 'ship_type' in df.columns:
-        df['ship_type'] = df['ship_type'].map(type_map)
+        df['ship_type'] = df['ship_type'].map(type_map).fillna(df['ship_type'])
         df = df[df['ship_type'].isin(valid_types)]
 
-    # df['time'] = pd.to_datetime(df['time'], utc=True).dt.tz_localize(None)
-
+    """
+    # originally, pandas uses the format of the first row, it breaks on rows that doesn’t match
     try:
         df['time'] = pd.to_datetime(df['time'], utc=True).dt.tz_localize(None)
     except Exception:
         df['time'] = pd.to_datetime(df['time'], utc=True)
+    """
+
+    t = pd.to_datetime(df['time'], utc=True, errors='coerce', format='ISO8601')
+    n_bad = t.isna().sum()
+    if n_bad:
+        print(f"  WARNING: dropping {n_bad} rows with unparseable timestamps")
+    df['time'] = t.dt.tz_localize(None)
+    df = df[df['time'].notna()]
 
     for col in ['mmsi', 'lat', 'lon', 'sog', 'length', 'breadth', 'draught']:
         if col in df.columns:
@@ -703,11 +715,4 @@ def main(csv_path, output_dir, config_path):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Preprocess raw AIS CSV into cleaned, interpolated '
-                    'Parquet files.')
-    parser.add_argument('--input', required=True, help='Path to raw AIS CSV')
-    parser.add_argument('--output', required=True, help='Output directory')
-    parser.add_argument('--config', required=True, help='Path to config.yaml')
-    args = parser.parse_args()
-    main(args.input, args.output, args.config)
+    main(CSV_PATH, OUTPUT_DIR, CONFIG_PATH)
