@@ -10,7 +10,16 @@ zone:
   coastline_path: "/Users/maximilianlauch/Documents/Model_Python_Conversion/py_data/coastlines/salish_sea_coastline.geojson"
 
 
-timestep_minutes: 5         # model timestep - interpolate to this grid as "coarse" model grid
-max_interp_gap_minutes: 60  # don't interpolate across gaps larger than this
-max_stitch_hours: 6
-sog_max: 30                 # Maximum SOG any of the ships can go, otherwise those points are dropped
+# --- AIS preprocessing (Preprocess_ais.py) ---
+timestep_minutes: 5         # model time grid that Pass 2 interpolates onto
+
+# Speed
+sog_min: 0.25               # kn; slower points count as stationary and are removed
+sog_max: 45                 # kn; reported sog above this is not trusted, speeds are clipped here
+max_disagreement: 5         # kn; reported sog is replaced by position-derived speed if they differ by more
+max_jump_kn: 50             # kn; implied speed above this marks a GPS jump
+
+# Gap filling (Pass 1 segments and cross-day stitching use the same rules)
+max_fill_minutes: 30        # longest reporting gap that gets interpolated
+max_fill_nm: 5.0            # longest straight line a filled gap may cover
+min_points: 3               # segments shorter than this are dropped
