@@ -11,6 +11,6 @@ zone:
 
 
 timestep_minutes: 5         # model timestep - interpolate to this grid as "coarse" model grid
-max_interp_gap_minutes: 60  # don't interpolate across gaps larger than this
+max_interp_gap_minutes: 30  # don't interpolate across gaps larger than this
 max_stitch_hours: 6
 sog_max: 30                 # Maximum SOG any of the ships can go, otherwise those points are dropped

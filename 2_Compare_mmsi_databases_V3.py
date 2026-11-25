@@ -7,9 +7,9 @@ not in the database at all            -> flag "to_scrub", row left as in the inp
 
 import pandas as pd
 
-DATABASE_FILE = "C:/Users/ZHANGD/Desktop/AIS_preprocess_acoustics/AIS_Corrections/Vessel_Database.csv"
-Input = "C:/Users/ZHANGD/Desktop/AIS_preprocess_acoustics/output/mmsi-length_2015_uncorrected.csv"
-Output = "C:/Users/ZHANGD/Desktop/AIS_preprocess_acoustics/output/2015_flagged.csv"
+DATABASE_FILE = "C:/Users/ZHANGD/Desktop/AIS_preprocess_acoustics/Vessel_Database.csv"
+Input = "C:/Users/ZHANGD/Desktop/AIS_preprocess_acoustics/output/mmsi-length_2025_uncorrected.csv"
+Output = "C:/Users/ZHANGD/Desktop/AIS_preprocess_acoustics/output/2025_flagged.csv"
 
 
 MMSI_COL = "mmsi"

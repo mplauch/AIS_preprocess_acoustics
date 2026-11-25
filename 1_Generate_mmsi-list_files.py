@@ -1,6 +1,6 @@
 import pandas as pd
 
-CSV_INPUT = "/gpfs/fs7/dfo/meq/work/mal007/DATA/modelling/regional/SalishSea/traffic/AIS/Full_CSVS/January-December_A_VesselAISdata_2015.csv"
+CSV_INPUT = "/gpfs/fs7/dfo/meq/work/mal007/DATA/modelling/regional/SalishSea/traffic/AIS/Full_CSVS/Fixed_AIS_2025.csv"
 
 # The list of mmsi in the raw file, as a csv
 CSV_OUTPUT = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/mmsi-length_2015_uncorrected.csv"

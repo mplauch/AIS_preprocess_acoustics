@@ -23,9 +23,9 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 DIR = Path("C:/Users/ZHANGD/Desktop/AIS_preprocess_acoustics/output")
-INPUT_CSV = DIR / "2015_flagged.csv"
-RESULTS_CSV = DIR / "2015_scrub_results.csv"   # raw scrape results, saved as it goes (used to resume)
-OUTPUT_CSV = DIR / "2015_flagged_merged.csv"   # flagged list with the standardized scrape data merged in
+INPUT_CSV = DIR / "2025_flagged.csv"
+RESULTS_CSV = DIR / "2025_scrub_results.csv"   # raw scrape results, saved as it goes (used to resume)
+OUTPUT_CSV = DIR / "2025_flagged_merged.csv"   # flagged list with the standardized scrape data merged in
 
 BASE = "https://www.myshiptracking.com"
 SLEEP_SEC = 3.0

@@ -1,8 +1,8 @@
 import pandas as pd
 
-RAW_CSV = "/gpfs/fs7/dfo/meq/work/mal007/DATA/modelling/regional/SalishSea/traffic/AIS/Full_CSVS/January-December_A_VesselAISdata_2015.csv"
-MERGED_CSV =  "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/2015_flagged_merged.csv"
-OUT_CSV = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/Fixed_AIS_2015_Corrected.csv"
+RAW_CSV = "/gpfs/fs7/dfo/meq/work/mal007/DATA/modelling/regional/SalishSea/traffic/AIS/Full_CSVS/Fixed_AIS_2025.csv"
+MERGED_CSV =  "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/2025_flagged_merged.csv"
+OUT_CSV = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/Fixed_AIS_2025_Corrected.csv"
 
 CHUNKSIZE = 2_000_000
 

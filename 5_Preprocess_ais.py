@@ -34,10 +34,10 @@ import warnings
 
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 
-CSV_PATH = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/Fixed_AIS_2015_Corrected.csv"
+CSV_PATH = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/Fixed_AIS_2025_Corrected.csv"
 
 # Output directory (creates clean/ and interpolated/ subfolders)
-OUTPUT_DIR = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/2015_daily_ais"
+OUTPUT_DIR = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/2025_daily_ais_New"
 
 # Zone / timestep settings (zone_config.yaml)
 CONFIG_PATH = "/gpfs/fs7/dfo/meq/work/doz001/AIS_Preprocessing/zone_config.yaml"
@@ -199,12 +199,47 @@ def segment_track(group, max_gap_minutes=30, max_jump_kn=40):
 # Quality filtering (interpolate-first approach)
 # ===========================================================================
 
+def _refill_short_gaps(work, fine_interval_sec, max_refill_gap_minutes, dt_h):
+    """
+    Re-interpolate surviving points back onto the fine grid, one run at a time.
+    Runs are split wherever consecutive survivors are more than
+    max_refill_gap_minutes apart, so long removed stretches stay empty.
+    Speed and acceleration are recomputed per run, so they never span a gap.
+    """
+    gap_sec = work['time'].diff().dt.total_seconds()
+    run_id = (gap_sec > max_refill_gap_minutes * 60).cumsum()
+
+    pieces = []
+    for _, run in work.groupby(run_id):
+        if len(run) < 2:
+            continue
+        t_surv = (run['time'] - run['time'].iloc[0]).dt.total_seconds().values.astype(float)
+        t_refill = np.arange(0, t_surv[-1] + fine_interval_sec / 2, fine_interval_sec)
+        piece = pd.DataFrame({
+            'time': run['time'].iloc[0] + pd.to_timedelta(t_refill, unit='s'),
+            'lat': np.interp(t_refill, t_surv, run['lat'].values),
+            'lon': np.interp(t_refill, t_surv, run['lon'].values),
+        })
+        piece['sog_pos'] = compute_centered_speed(
+            piece['lat'].values, piece['lon'].values, piece['time'].values)
+        piece['sog_final'] = piece['sog_pos']
+        piece['aog_final'] = (np.gradient(piece['sog_final'].values) / dt_h
+                              if len(piece) > 1 else np.nan)
+        pieces.append(piece)
+
+    if not pieces:
+        return None
+    return pd.concat(pieces, ignore_index=True)
+
+
 def quality_filter_segment(seg, min_points=3,
-                           sog_min=0.05, sog_max=30.0,
+                           sog_min=0.0, sog_max=30.0,
                            aog_max=50.0, max_iterations=10,
                            fine_interval_sec=60,
                            sog_trust_min=3.0, sog_trust_max=30.0,
-                           max_sog_disagreement=5.0):
+                           max_sog_disagreement=5.0,
+                           use_stat_filter=False,
+                           max_refill_gap_minutes=30):
     """
     quality_filter_segment does the following:
       1. Removes isolated position jumps from the raw data
@@ -218,6 +253,8 @@ def quality_filter_segment(seg, min_points=3,
 
     Returns a df on the finer grid, or None if segment is discarded
     """
+    params = {k: v for k, v in locals().items() if k != 'seg'}  # for the split-and-recurse below
+
     if len(seg) < min_points:
         return None
 
@@ -241,6 +278,15 @@ def quality_filter_segment(seg, min_points=3,
         seg = seg[~is_jump].reset_index(drop=True)
         if len(seg) < min_points:
             return None
+
+    # Removing jumps can open long holes in the raw data. Filter each side of
+    # such a hole separately so Step 1 doesn't bridge it with a straight line.
+    long_gap = seg['time'].diff().dt.total_seconds() > max_refill_gap_minutes * 60
+    if long_gap.any():
+        parts = [quality_filter_segment(part, **params)
+                 for _, part in seg.groupby(long_gap.cumsum())]
+        parts = [p for p in parts if p is not None]
+        return pd.concat(parts, ignore_index=True) if parts else None
 
     # Step 1: Interpolate onto fine regular grid
     t_min = seg['time'].min()
@@ -307,8 +353,12 @@ def quality_filter_segment(seg, min_points=3,
         # Apply acceleration bounds
         cond_accel = (aog.abs() <= aog_max) | aog.isna()
 
-        # Statistical outliers (using initial stats from Step 3)
-        if sog_std_init > 0:
+        # Statistical outliers (using initial stats from Step 3).
+        # Off by default: for a ship that is stationary most of the segment
+        # (at berth, anchored, a tug on standby), its real transits sit
+        # outside mean + 3*std and were being removed. sog_max and the
+        # acceleration limit already catch real speed outliers.
+        if use_stat_filter and sog_std_init > 0:
             cond_stat = (sog - sog_mean_init).abs() <= 3 * sog_std_init
         else:
             cond_stat = pd.Series(True, index=work.index)
@@ -322,22 +372,13 @@ def quality_filter_segment(seg, min_points=3,
         if len(work) < min_points:
             return None
 
-        # Re-interpolate to fill gaps left by filtered/removed points
-        t_surv = (work['time'] - work['time'].iloc[0]).dt.total_seconds().values.astype(float)
-        t_refill = np.arange(0, t_surv[-1] + fine_interval_sec, fine_interval_sec)
-        refill_times = work['time'].iloc[0] + pd.to_timedelta(t_refill, unit='s')
-
-        work = pd.DataFrame({
-            'time': refill_times,
-            'lat': np.interp(t_refill, t_surv, work['lat'].values),
-            'lon': np.interp(t_refill, t_surv, work['lon'].values),
-        })
-
-        # Recompute sog on the refilled grid
-        work['sog_pos'] = compute_centered_speed(
-            work['lat'].values, work['lon'].values, work['time'].values)
-        work['sog_final'] = work['sog_pos']
-        work['aog_final'] = np.gradient(work['sog_final'].values) / dt_h
+        # Re-interpolate to fill gaps left by filtered/removed points, but
+        # only short ones. A removed stretch longer than max_refill_gap_minutes
+        # is left as a real gap, instead of being bridged with a straight line
+        # (which Pass 2's max_interp_gap check could no longer detect).
+        work = _refill_short_gaps(work, fine_interval_sec, max_refill_gap_minutes, dt_h)
+        if work is None or len(work) < min_points:
+            return None
 
     if len(work) < min_points:
         return None
